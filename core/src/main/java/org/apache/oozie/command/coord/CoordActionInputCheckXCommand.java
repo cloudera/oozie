@@ -17,16 +17,22 @@
  */
 package org.apache.oozie.command.coord;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.StringReader;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.text.ParseException;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.util.Shell.ShellCommandExecutor;
 import org.apache.oozie.CoordinatorActionBean;
 import org.apache.oozie.CoordinatorJobBean;
 import org.apache.oozie.ErrorCode;
@@ -62,15 +68,17 @@ import org.apache.oozie.util.XLog;
 import org.apache.oozie.util.XmlUtils;
 import org.jdom.Element;
 
+
 /**
- * The command to check if an action's data input paths exist in the file system.
+ * The command to check if an action's data input paths exist in the file
+ * system.
  */
 public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
 
     private final String actionId;
     /**
-     * Property name of command re-queue interval for coordinator action input check in
-     * milliseconds.
+     * Property name of command re-queue interval for coordinator action input
+     * check in milliseconds.
      */
     public static final String CONF_COORD_INPUT_CHECK_REQUEUE_INTERVAL = Service.CONF_PREFIX
             + "coord.input.check.requeue.interval";
@@ -84,15 +92,17 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
     private JPAService jpaService = null;
     private String jobId = null;
 
+
     public CoordActionInputCheckXCommand(String actionId, String jobId) {
         super("coord_action_input", "coord_action_input", 1);
         this.actionId = ParamChecker.notEmpty(actionId, "actionId");
         this.jobId = jobId;
     }
 
+
     /**
-     * Computes the nominal time of the next action.
-     * Based on CoordMaterializeTransitionXCommand#materializeActions
+     * Computes the nominal time of the next action. Based on
+     * CoordMaterializeTransitionXCommand#materializeActions
      *
      * @return the nominal time of the next action
      * @throws ParseException
@@ -103,13 +113,17 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         int freq = -1;
         try {
             freq = Integer.parseInt(coordJob.getFrequency());
-        } catch (NumberFormatException e) {
+        }
+        catch (NumberFormatException e) {
             isCronFrequency = true;
         }
 
         if (isCronFrequency) {
-            nextNominalTime = CoordCommandUtils.getNextValidActionTimeForCronFrequency(coordAction.getNominalTime(), coordJob);
-        } else {
+            nextNominalTime =
+                    CoordCommandUtils.getNextValidActionTimeForCronFrequency(coordAction.getNominalTime(),
+                        coordJob);
+        }
+        else {
             Calendar nextNominalTimeCal = Calendar.getInstance(DateUtils.getTimeZone(coordJob.getTimeZone()));
             nextNominalTimeCal.setTime(coordAction.getNominalTime());
             TimeUnit freqTU = TimeUnit.valueOf(coordJob.getTimeUnitStr());
@@ -117,12 +131,14 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             nextNominalTime = nextNominalTimeCal.getTime();
         }
 
-        // If the next nominal time is after the job's end time, then this is the last action, so return null
+        // If the next nominal time is after the job's end time, then this is
+        // the last action, so return null
         if (nextNominalTime.after(coordJob.getEndTime())) {
             nextNominalTime = null;
         }
         return nextNominalTime;
     }
+
 
     @Override
     protected Void execute() throws CommandException {
@@ -133,12 +149,14 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         Date nominalTime = coordAction.getNominalTime();
         Date currentTime = new Date();
         if (nominalTime.compareTo(currentTime) > 0) {
-            queue(new CoordActionInputCheckXCommand(coordAction.getId(), coordAction.getJobId()), Math.max((nominalTime.getTime() - currentTime
-                    .getTime()), getCoordInputCheckRequeueInterval()));
+            queue(new CoordActionInputCheckXCommand(coordAction.getId(), coordAction.getJobId()), Math.max(
+                (nominalTime.getTime() - currentTime.getTime()), getCoordInputCheckRequeueInterval()));
             updateCoordAction(coordAction, false);
-            LOG.info("[" + actionId
+            LOG.info("["
+                    + actionId
                     + "]::ActionInputCheck:: nominal Time is newer than current time, so requeue and wait. Current="
-                    + DateUtils.formatDateOozieTZ(currentTime) + ", nominal=" + DateUtils.formatDateOozieTZ(nominalTime));
+                    + DateUtils.formatDateOozieTZ(currentTime) + ", nominal="
+                    + DateUtils.formatDateOozieTZ(nominalTime));
 
             return null;
         }
@@ -151,18 +169,23 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
                 Date now = new Date();
                 Date nextNominalTime = computeNextNominalTime();
                 if (nextNominalTime != null) {
-                    // If the current time is after the next action's nominal time, then we've passed the window where this action
+                    // If the current time is after the next action's nominal
+                    // time, then we've passed the window where this action
                     // should be started; so set it to SKIPPED
                     if (now.after(nextNominalTime)) {
-                        LOG.info("LAST_ONLY execution: Preparing to skip action [{0}] because the current time [{1}] is later than "
-                                + "the nominal time [{2}] of the next action]", coordAction.getId(),
-                                DateUtils.formatDateOozieTZ(now), DateUtils.formatDateOozieTZ(nextNominalTime));
-                        queue(new CoordActionSkipXCommand(coordAction, coordJob.getUser(), coordJob.getAppName()));
+                        LOG.info(
+                            "LAST_ONLY execution: Preparing to skip action [{0}] because the current time [{1}] is later than "
+                                    + "the nominal time [{2}] of the next action]", coordAction.getId(),
+                            DateUtils.formatDateOozieTZ(now), DateUtils.formatDateOozieTZ(nextNominalTime));
+                        queue(new CoordActionSkipXCommand(coordAction, coordJob.getUser(),
+                            coordJob.getAppName()));
                         return null;
-                    } else {
-                        LOG.debug("LAST_ONLY execution: Not skipping action [{0}] because the current time [{1}] is earlier than "
-                                + "the nominal time [{2}] of the next action]", coordAction.getId(),
-                                DateUtils.formatDateOozieTZ(now), DateUtils.formatDateOozieTZ(nextNominalTime));
+                    }
+                    else {
+                        LOG.debug(
+                            "LAST_ONLY execution: Not skipping action [{0}] because the current time [{1}] is earlier than "
+                                    + "the nominal time [{2}] of the next action]", coordAction.getId(),
+                            DateUtils.formatDateOozieTZ(now), DateUtils.formatDateOozieTZ(nextNominalTime));
                     }
                 }
             }
@@ -173,24 +196,49 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             String missingDeps = coordAction.getMissingDependencies();
             CoordCommandUtils.getResolvedList(missingDeps, nonExistList, nonResolvedList);
 
-            // For clarity regarding which is the missing dependency in synchronous order
+            // For clarity regarding which is the missing dependency in
+            // synchronous order
             // instead of printing entire list, some of which, may be available
-            if(nonExistList.length() > 0) {
-                firstMissingDependency = nonExistList.toString().split(CoordELFunctions.INSTANCE_SEPARATOR)[0];
+            if (nonExistList.length() > 0) {
+                firstMissingDependency =
+                        nonExistList.toString().split(CoordELFunctions.INSTANCE_SEPARATOR)[0];
             }
-            LOG.info("[" + actionId + "]::CoordActionInputCheck:: Missing deps:" + firstMissingDependency + " "
-                    + nonResolvedList.toString());
-            // Updating the list of data dependencies that are available and those that are yet not
+            LOG.info("[" + actionId + "]::CoordActionInputCheck:: Missing deps:" + firstMissingDependency
+                    + " " + nonResolvedList.toString());
+            // Updating the list of data dependencies that are available and
+            // those that are yet not
             boolean status = checkInput(actionXml, existList, nonExistList, actionConf);
+            // Chekckout done-shell
+            boolean shellFlag = false;
+            boolean shellStatus = false;
+            Element eAction = XmlUtils.parseXml(actionXml.toString());
+            Element shell = eAction.getChild("done-shell", eAction.getNamespace());
+            if (shell != null) {
+                shellFlag = true;
+                shellStatus = checkShell(actionXml, nominalTime);
+            }
+            if (shellStatus == true) {
+                String newActionXml = resolveCoordConfiguration(actionXml, actionConf, actionId);
+                actionXml.replace(0, actionXml.length(), newActionXml);
+                coordAction.setActionXml(actionXml.toString());
+                coordAction.setStatus(CoordinatorAction.Status.READY);
+                updateCoordAction(coordAction, true);
+                new CoordActionReadyXCommand(coordAction.getJobId()).call(getEntityKey());
+            }
             String pushDeps = coordAction.getPushMissingDependencies();
-            // Resolve latest/future only when all current missingDependencies and
+            // Resolve latest/future only when all current missingDependencies
+            // and
             // pushMissingDependencies are met
             if (status && nonResolvedList.length() > 0) {
-                status = (pushDeps == null || pushDeps.length() == 0) ? checkUnResolvedInput(actionXml, actionConf)
-                        : false;
+                status =
+                        (pushDeps == null || pushDeps.length() == 0) ? checkUnResolvedInput(actionXml,
+                            actionConf) : false;
             }
             coordAction.setLastModifiedTime(currentTime);
             coordAction.setActionXml(actionXml.toString());
+            if (shellFlag == true) {
+                return null;
+            }
             if (nonResolvedList.length() > 0 && status == false) {
                 nonExistList.append(CoordCommandUtils.RESOLVED_UNRESOLVED_SEPARATOR).append(nonResolvedList);
             }
@@ -211,13 +259,14 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             else if (!isTimeout(currentTime)) {
                 if (status == false) {
                     queue(new CoordActionInputCheckXCommand(coordAction.getId(), coordAction.getJobId()),
-                            getCoordInputCheckRequeueInterval());
+                        getCoordInputCheckRequeueInterval());
                 }
                 updateCoordAction(coordAction, isChangeInDependency);
             }
             else {
                 if (!nonExistListStr.isEmpty() && pushDeps == null || pushDeps.length() == 0) {
-                    queue(new CoordActionTimeOutXCommand(coordAction, coordJob.getUser(), coordJob.getAppName()));
+                    queue(new CoordActionTimeOutXCommand(coordAction, coordJob.getUser(),
+                        coordJob.getAppName()));
                 }
                 else {
                     // Let CoordPushDependencyCheckXCommand queue the timeout
@@ -230,8 +279,11 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             if (isTimeout(currentTime)) {
                 LOG.debug("Queueing timeout command");
                 // XCommand.queue() will not work when there is a Exception
-                Services.get().get(CallableQueueService.class)
-                        .queue(new CoordActionTimeOutXCommand(coordAction, coordJob.getUser(), coordJob.getAppName()));
+                Services
+                    .get()
+                    .get(CallableQueueService.class)
+                    .queue(
+                        new CoordActionTimeOutXCommand(coordAction, coordJob.getUser(), coordJob.getAppName()));
             }
             updateCoordAction(coordAction, isChangeInDependency);
             throw new CommandException(ErrorCode.E1021, e.getMessage(), e);
@@ -240,20 +292,24 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
     }
 
 
-    static String resolveCoordConfiguration(StringBuilder actionXml, Configuration actionConf, String actionId) throws Exception {
+    static String resolveCoordConfiguration(StringBuilder actionXml, Configuration actionConf, String actionId)
+            throws Exception {
         Element eAction = XmlUtils.parseXml(actionXml.toString());
         ELEvaluator eval = CoordELEvaluator.createDataEvaluator(eAction, actionConf, actionId);
         materializeDataProperties(eAction, actionConf, eval);
         return XmlUtils.prettyPrint(eAction).toString();
     }
 
+
     private boolean isTimeout(Date currentTime) {
-        long waitingTime = (currentTime.getTime() - Math.max(coordAction.getNominalTime().getTime(), coordAction
-                .getCreatedTime().getTime()))
-                / (60 * 1000);
+        long waitingTime =
+                (currentTime.getTime() - Math.max(coordAction.getNominalTime().getTime(), coordAction
+                    .getCreatedTime().getTime()))
+                        / (60 * 1000);
         int timeOut = coordAction.getTimeOut();
         return (timeOut >= 0) && (waitingTime > timeOut);
     }
+
 
     private void updateCoordAction(CoordinatorActionBean coordAction, boolean isChangeInDependency)
             throws CommandException {
@@ -262,8 +318,9 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             try {
                 if (isChangeInDependency) {
                     CoordActionQueryExecutor.getInstance().executeUpdate(
-                            CoordActionQuery.UPDATE_COORD_ACTION_FOR_INPUTCHECK, coordAction);
-                    if (EventHandlerService.isEnabled() && coordAction.getStatus() != CoordinatorAction.Status.READY) {
+                        CoordActionQuery.UPDATE_COORD_ACTION_FOR_INPUTCHECK, coordAction);
+                    if (EventHandlerService.isEnabled()
+                            && coordAction.getStatus() != CoordinatorAction.Status.READY) {
                         // since event is not to be generated unless action
                         // RUNNING via StartX
                         generateEvent(coordAction, coordJob.getUser(), coordJob.getAppName(), null);
@@ -271,7 +328,7 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
                 }
                 else {
                     CoordActionQueryExecutor.getInstance().executeUpdate(
-                            CoordActionQuery.UPDATE_COORD_ACTION_FOR_MODIFIED_DATE, coordAction);
+                        CoordActionQuery.UPDATE_COORD_ACTION_FOR_MODIFIED_DATE, coordAction);
                 }
             }
             catch (JPAExecutorException jex) {
@@ -279,6 +336,7 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             }
         }
     }
+
 
     /**
      * This function reads the value of re-queue interval for coordinator input
@@ -289,26 +347,135 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
      * @return re-queue interval in ms
      */
     public long getCoordInputCheckRequeueInterval() {
-        long requeueInterval = Services.get().getConf().getLong(CONF_COORD_INPUT_CHECK_REQUEUE_INTERVAL,
-                DEFAULT_COMMAND_REQUEUE_INTERVAL);
+        long requeueInterval =
+                Services.get().getConf()
+                    .getLong(CONF_COORD_INPUT_CHECK_REQUEUE_INTERVAL, DEFAULT_COMMAND_REQUEUE_INTERVAL);
         return requeueInterval;
     }
+
 
     /**
      * To check the list of input paths if all of them exist
      *
-     * @param actionXml action xml
-     * @param existList the list of existed paths
-     * @param nonExistList the list of non existed paths
-     * @param conf action configuration
+     * @param actionXml
+     *            action xml
+     * @param existList
+     *            the list of existed paths
+     * @param nonExistList
+     *            the list of non existed paths
+     * @param conf
+     *            action configuration
      * @return true if all input paths are existed
-     * @throws Exception thrown of unable to check input path
+     * @throws Exception
+     *             thrown of unable to check input path
      */
-    protected boolean checkInput(StringBuilder actionXml, StringBuilder existList, StringBuilder nonExistList,
-            Configuration conf) throws Exception {
+    protected boolean checkInput(StringBuilder actionXml, StringBuilder existList,
+            StringBuilder nonExistList, Configuration conf) throws Exception {
         Element eAction = XmlUtils.parseXml(actionXml.toString());
         return checkResolvedUris(eAction, existList, nonExistList, conf);
     }
+
+
+    protected String SimpleMD5(String executeshell) {
+        // Date currentTime = new Date();
+        // SimpleDateFormat formatter = new
+        // SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        // String dateString = formatter.format(currentTime);
+        String generatedPassword = null;
+        try {
+            // Create MessageDigest instance for MD5
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            // Add password bytes to digest
+            md.update(executeshell.getBytes());
+            // Get the hash's bytes
+            byte[] bytes = md.digest();
+            // This bytes[] has bytes in decimal format;
+            // Convert it to hexadecimal format
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < bytes.length; i++) {
+                sb.append(Integer.toString((bytes[i] & 0xff) + 0x100, 16).substring(1));
+            }
+            // Get complete hashed password in hex format
+            generatedPassword = sb.toString();
+        }
+        catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        return generatedPassword;
+    }
+
+
+    /**
+     *
+     * @param actionXml
+     * @param conf
+     * @return
+     * @throws Exception
+     */
+    protected boolean checkShell(StringBuilder actionXml, Date nominalTime) throws Exception {
+        Element eAction = XmlUtils.parseXml(actionXml.toString());
+        Element shell = eAction.getChild("done-shell", eAction.getNamespace());
+        Element shellPath = shell.getChild("shell", eAction.getNamespace());
+        // Element shellNominalTime = shell.getChild("wf-nominalTime",
+        // eAction.getNamespace());
+        String doneNominalTime = "true";
+        // if (shellNominalTime != null){
+        // doneNominalTime = shellNominalTime.getTextNormalize();
+        // }
+        if (shellPath != null && nominalTime != null) {
+            String executeshell = shellPath.getText();
+            String[] pwd = { "pwd" };
+            ShellCommandExecutor shellLocation = new ShellCommandExecutor(pwd);
+            shellLocation.execute();
+            String location = shellLocation.getOutput();
+            location = location.trim();
+            String filePath =
+                    location + "/shell/done-shell" + SimpleMD5(coordJob.getUser() + executeshell) + ".sh";
+            File file = new File(filePath);
+            if (!file.exists()) {
+                try {
+                    FileOutputStream fos = new FileOutputStream(filePath);
+                    fos.write(executeshell.getBytes());
+                    fos.close();
+                    file.setExecutable(true);
+                    String[] command =
+                            { "bash", "-c",
+                             "sudo chown " + coordJob.getUser() + ":" + coordJob.getUser() + " " + filePath };
+                    ShellCommandExecutor shellCommandExecutor = new ShellCommandExecutor(command);
+                    shellCommandExecutor.execute();
+                    String outPut = shellCommandExecutor.getOutput();
+                }
+                catch (Exception e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
+            }
+            else {
+            }
+            // String[] command =
+            // "true".equalsIgnoreCase(doneNominalTime)?{executeshell,nominalTime.toString()}:{executeshell};
+            ArrayList<String> list = new ArrayList<String>();
+            list.add("bash");
+            list.add("-c");
+            list.add("sudo -u " + coordJob.getUser() + " bash -c " + filePath);
+            if ("true".equalsIgnoreCase(doneNominalTime)) {
+                list.add(nominalTime.toString());
+            }
+            int size = list.size();
+            String[] command = (String[]) list.toArray(new String[size]);
+            ShellCommandExecutor shellCommandExecutor = new ShellCommandExecutor(command);
+            shellCommandExecutor.execute();
+            String outPut = shellCommandExecutor.getOutput();
+            if (outPut.indexOf("true") != -1) {
+                return true;
+            }
+            else if (outPut.indexOf("false") != -1) {
+                return false;
+            }
+        }
+        return false;
+    }
+
 
     protected boolean checkUnResolvedInput(StringBuilder actionXml, Configuration conf) throws Exception {
         Element eAction = XmlUtils.parseXml(actionXml.toString());
@@ -320,33 +487,47 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         return allExist;
     }
 
+
     /**
-     * Materialize data properties defined in <action> tag. it includes dataIn(<DS>) and dataOut(<DS>) it creates a list
-     * of files that will be needed.
+     * Materialize data properties defined in <action> tag. it includes
+     * dataIn(<DS>) and dataOut(<DS>) it creates a list of files that will be
+     * needed.
      *
-     * @param eAction action element
-     * @param conf action configuration
-     * @throws Exception thrown if failed to resolve data properties
+     * @param eAction
+     *            action element
+     * @param conf
+     *            action configuration
+     * @throws Exception
+     *             thrown if failed to resolve data properties
      * @update modify 'Action' element with appropriate list of files.
      */
     @SuppressWarnings("unchecked")
-    static void materializeDataProperties(Element eAction, Configuration conf, ELEvaluator eval) throws Exception {
-        Element configElem = eAction.getChild("action", eAction.getNamespace()).getChild("workflow",
-                eAction.getNamespace()).getChild("configuration", eAction.getNamespace());
+    static void materializeDataProperties(Element eAction, Configuration conf, ELEvaluator eval)
+            throws Exception {
+        Element configElem =
+                eAction.getChild("action", eAction.getNamespace())
+                    .getChild("workflow", eAction.getNamespace())
+                    .getChild("configuration", eAction.getNamespace());
         if (configElem != null) {
-            for (Element propElem : (List<Element>) configElem.getChildren("property", configElem.getNamespace())) {
+            for (Element propElem : (List<Element>) configElem.getChildren("property",
+                configElem.getNamespace())) {
                 resolveTagContents("value", propElem, eval);
             }
         }
     }
 
+
     /**
      * To resolve property value which contains el functions
      *
-     * @param tagName tag name
-     * @param elem the child element of "property" element
-     * @param eval el functions evaluator
-     * @throws Exception thrown if unable to resolve tag value
+     * @param tagName
+     *            tag name
+     * @param elem
+     *            the child element of "property" element
+     * @param eval
+     *            el functions evaluator
+     * @throws Exception
+     *             thrown if unable to resolve tag value
      */
     private static void resolveTagContents(String tagName, Element elem, ELEvaluator eval) throws Exception {
         if (elem == null) {
@@ -363,13 +544,18 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         }
     }
 
+
     /**
-     * Check if any unsolved paths under data output. Resolve the unresolved data input paths.
+     * Check if any unsolved paths under data output. Resolve the unresolved
+     * data input paths.
      *
-     * @param eAction action element
-     * @param actionConf action configuration
+     * @param eAction
+     *            action element
+     * @param actionConf
+     *            action configuration
      * @return true if successful to resolve input and output paths
-     * @throws Exception thrown if failed to resolve data input and output paths
+     * @throws Exception
+     *             thrown if failed to resolve data input and output paths
      */
     @SuppressWarnings("unchecked")
     private boolean checkUnresolvedInstances(Element eAction, Configuration actionConf) throws Exception {
@@ -378,10 +564,11 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         String actualTimeStr = eAction.getAttributeValue("action-actual-time");
         Date actualTime = null;
         if (actualTimeStr == null) {
-            LOG.debug("Unable to get action-actual-time from action xml, this job is submitted " +
-            "from previous version. Assign current date to actual time, action = " + actionId);
+            LOG.debug("Unable to get action-actual-time from action xml, this job is submitted "
+                    + "from previous version. Assign current date to actual time, action = " + actionId);
             actualTime = new Date();
-        } else {
+        }
+        else {
             actualTime = DateUtils.parseDateOozieTZ(actualTimeStr);
         }
 
@@ -390,8 +577,9 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         boolean ret;
         Element inputList = eAction.getChild("input-events", eAction.getNamespace());
         if (inputList != null) {
-            ret = materializeUnresolvedEvent(inputList.getChildren("data-in", eAction.getNamespace()), nominalTime,
-                    actualTime, actionConf);
+            ret =
+                    materializeUnresolvedEvent(inputList.getChildren("data-in", eAction.getNamespace()),
+                        nominalTime, actualTime, actionConf);
             if (ret == false) {
                 resultedXml.append(strAction);
                 return false;
@@ -405,22 +593,28 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             for (Element dEvent : (List<Element>) outputList.getChildren("data-out", eAction.getNamespace())) {
                 if (dEvent.getChild(CoordCommandUtils.UNRESOLVED_INST_TAG, dEvent.getNamespace()) != null) {
                     throw new CommandException(ErrorCode.E1006, "coord:latest()/future()",
-                            " not permitted in output-event ");
+                        " not permitted in output-event ");
                 }
             }
         }
         return true;
     }
 
+
     /**
      * Resolve the list of data input paths
      *
-     * @param eDataEvents the list of data input elements
-     * @param nominalTime action nominal time
-     * @param actualTime current time
-     * @param conf action configuration
+     * @param eDataEvents
+     *            the list of data input elements
+     * @param nominalTime
+     *            action nominal time
+     * @param actualTime
+     *            current time
+     * @param conf
+     *            action configuration
      * @return true if all unresolved URIs can be resolved
-     * @throws Exception thrown if failed to resolve data input paths
+     * @throws Exception
+     *             thrown if failed to resolve data input paths
      */
     @SuppressWarnings("unchecked")
     private boolean materializeUnresolvedEvent(List<Element> eDataEvents, Date nominalTime, Date actualTime,
@@ -430,7 +624,9 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
                 continue;
             }
             ELEvaluator eval = CoordELEvaluator.createLazyEvaluator(actualTime, nominalTime, dEvent, conf);
-            String uresolvedInstance = dEvent.getChild(CoordCommandUtils.UNRESOLVED_INST_TAG, dEvent.getNamespace()).getTextTrim();
+            String uresolvedInstance =
+                    dEvent.getChild(CoordCommandUtils.UNRESOLVED_INST_TAG, dEvent.getNamespace())
+                        .getTextTrim();
             String unresolvedList[] = uresolvedInstance.split(CoordELFunctions.INSTANCE_SEPARATOR);
             StringBuffer resolvedTmp = new StringBuffer();
             for (int i = 0; i < unresolvedList.length; i++) {
@@ -448,7 +644,7 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             if (resolvedTmp.length() > 0) {
                 if (dEvent.getChild("uris", dEvent.getNamespace()) != null) {
                     resolvedTmp.append(CoordELFunctions.INSTANCE_SEPARATOR).append(
-                            dEvent.getChild("uris", dEvent.getNamespace()).getTextTrim());
+                        dEvent.getChild("uris", dEvent.getNamespace()).getTextTrim());
                     dEvent.removeChild("uris", dEvent.getNamespace());
                 }
                 Element uriInstance = new Element("uris", dEvent.getNamespace());
@@ -461,15 +657,21 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         return true;
     }
 
+
     /**
      * Check all resolved URIs existence
      *
-     * @param eAction action element
-     * @param existList the list of existed paths
-     * @param nonExistList the list of paths to check existence
-     * @param conf action configuration
+     * @param eAction
+     *            action element
+     * @param existList
+     *            the list of existed paths
+     * @param nonExistList
+     *            the list of paths to check existence
+     * @param conf
+     *            action configuration
      * @return true if all nonExistList paths exist
-     * @throws IOException thrown if unable to access the path
+     * @throws IOException
+     *             thrown if unable to access the path
      */
     private boolean checkResolvedUris(Element eAction, StringBuilder existList, StringBuilder nonExistList,
             Configuration conf) throws IOException {
@@ -483,21 +685,27 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         return true;
     }
 
+
     /**
      * Check a list of non existed paths and add to exist list if it exists
      *
-     * @param existList the list of existed paths
-     * @param nonExistList the list of paths to check existence
-     * @param conf action configuration
+     * @param existList
+     *            the list of existed paths
+     * @param nonExistList
+     *            the list of paths to check existence
+     * @param conf
+     *            action configuration
      * @return true if all nonExistList paths exist
-     * @throws IOException thrown if unable to access the path
+     * @throws IOException
+     *             thrown if unable to access the path
      */
     private boolean checkListOfPaths(StringBuilder existList, StringBuilder nonExistList, Configuration conf)
             throws IOException {
 
         String[] uriList = nonExistList.toString().split(CoordELFunctions.INSTANCE_SEPARATOR);
         if (uriList[0] != null) {
-            LOG.info("[" + actionId + "]::ActionInputCheck:: In checkListOfPaths: " + uriList[0] + " is Missing.");
+            LOG.info("[" + actionId + "]::ActionInputCheck:: In checkListOfPaths: " + uriList[0]
+                    + " is Missing.");
         }
 
         nonExistList.delete(0, nonExistList.length());
@@ -507,7 +715,8 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         for (int i = 0; i < uriList.length; i++) {
             if (allExists) {
                 allExists = pathExists(uriList[i], conf, user);
-                LOG.info("[" + actionId + "]::ActionInputCheck:: File:" + uriList[i] + ", Exists? :" + allExists);
+                LOG.info("[" + actionId + "]::ActionInputCheck:: File:" + uriList[i] + ", Exists? :"
+                        + allExists);
             }
             if (allExists) {
                 existList.append(existSeparator).append(uriList[i]);
@@ -521,13 +730,17 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         return allExists;
     }
 
+
     /**
      * Check if given path exists
      *
-     * @param sPath uri path
-     * @param actionConf action configuration
+     * @param sPath
+     *            uri path
+     * @param actionConf
+     *            action configuration
      * @return true if path exists
-     * @throws IOException thrown if unable to access the path
+     * @throws IOException
+     *             thrown if unable to access the path
      */
     protected boolean pathExists(String sPath, Configuration actionConf, String user) throws IOException {
         LOG.debug("checking for the file " + sPath);
@@ -541,24 +754,32 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             coordAction.setErrorCode(e.getErrorCode().toString());
             coordAction.setErrorMessage(e.getMessage());
             throw new IOException(e);
-        } catch (URISyntaxException e) {
+        }
+        catch (URISyntaxException e) {
             coordAction.setErrorCode(ErrorCode.E0906.toString());
             coordAction.setErrorMessage(e.getMessage());
             throw new IOException(e);
         }
     }
 
+
     /**
-     * The function create a list of URIs separated by "," using the instances time stamp and URI-template
+     * The function create a list of URIs separated by "," using the instances
+     * time stamp and URI-template
      *
-     * @param event : <data-in> event
-     * @param instances : List of time stamp seprated by ","
-     * @param unresolvedInstances : list of instance with latest/future function
+     * @param event
+     *            : <data-in> event
+     * @param instances
+     *            : List of time stamp seprated by ","
+     * @param unresolvedInstances
+     *            : list of instance with latest/future function
      * @return : list of URIs separated by ",".
-     * @throws Exception thrown if failed to create URIs from unresolvedInstances
+     * @throws Exception
+     *             thrown if failed to create URIs from unresolvedInstances
      */
     @SuppressWarnings("unused")
-    private String createURIs(Element event, String instances, StringBuilder unresolvedInstances) throws Exception {
+    private String createURIs(Element event, String instances, StringBuilder unresolvedInstances)
+            throws Exception {
         if (instances == null || instances.length() == 0) {
             return "";
         }
@@ -578,14 +799,16 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
             if (uris.length() > 0) {
                 uris.append(CoordELFunctions.INSTANCE_SEPARATOR);
             }
-            uris.append(CoordELFunctions.evalAndWrap(eval, event.getChild("dataset", event.getNamespace()).getChild(
-                    "uri-template", event.getNamespace()).getTextTrim()));
+            uris.append(CoordELFunctions.evalAndWrap(eval, event.getChild("dataset", event.getNamespace())
+                .getChild("uri-template", event.getNamespace()).getTextTrim()));
         }
         return uris.toString();
     }
 
+
     /**
-     * getting the error code of the coord action. (used mainly for unit testing)
+     * getting the error code of the coord action. (used mainly for unit
+     * testing)
      */
     protected String getCoordActionErrorCode() {
         if (coordAction != null) {
@@ -594,8 +817,10 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         return null;
     }
 
+
     /**
-     * getting the error message of the coord action. (used mainly for unit testing)
+     * getting the error message of the coord action. (used mainly for unit
+     * testing)
      */
     protected String getCoordActionErrorMsg() {
         if (coordAction != null) {
@@ -604,15 +829,18 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         return null;
     }
 
+
     @Override
     public String getEntityKey() {
         return this.jobId;
     }
 
+
     @Override
     protected boolean isLockRequired() {
         return true;
     }
+
 
     @Override
     protected void loadState() throws CommandException {
@@ -621,14 +849,16 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
         }
         try {
             coordAction = jpaService.execute(new CoordActionGetForInputCheckJPAExecutor(actionId));
-            coordJob = CoordJobQueryExecutor.getInstance().get(CoordJobQuery.GET_COORD_JOB_INPUT_CHECK,
-                    coordAction.getJobId());
+            coordJob =
+                    CoordJobQueryExecutor.getInstance().get(CoordJobQuery.GET_COORD_JOB_INPUT_CHECK,
+                        coordAction.getJobId());
         }
         catch (JPAExecutorException je) {
             throw new CommandException(je);
         }
         LogUtils.setLogInfo(coordAction, logInfo);
     }
+
 
     @Override
     protected void verifyPrecondition() throws CommandException, PreconditionException {
@@ -638,22 +868,28 @@ public class CoordActionInputCheckXCommand extends CoordinatorXCommand<Void> {
                     + coordAction.getStatus());
         }
 
-        // if eligible to do action input check when running with backward support is true
+        // if eligible to do action input check when running with backward
+        // support is true
         if (StatusUtils.getStatusForCoordActionInputCheck(coordJob)) {
             return;
         }
 
-        if (coordJob.getStatus() != Job.Status.RUNNING && coordJob.getStatus() != Job.Status.RUNNINGWITHERROR && coordJob.getStatus() != Job.Status.PAUSED
+        if (coordJob.getStatus() != Job.Status.RUNNING && coordJob.getStatus() != Job.Status.RUNNINGWITHERROR
+                && coordJob.getStatus() != Job.Status.PAUSED
                 && coordJob.getStatus() != Job.Status.PAUSEDWITHERROR) {
             throw new PreconditionException(
-                    ErrorCode.E1100, "["+ actionId + "]::CoordActionInputCheck:: Ignoring action." +
-                    		" Coordinator job is not in RUNNING/RUNNINGWITHERROR/PAUSED/PAUSEDWITHERROR state, but state="
-                            + coordJob.getStatus());
+                ErrorCode.E1100,
+                "["
+                        + actionId
+                        + "]::CoordActionInputCheck:: Ignoring action."
+                        + " Coordinator job is not in RUNNING/RUNNINGWITHERROR/PAUSED/PAUSEDWITHERROR state, but state="
+                        + coordJob.getStatus());
         }
     }
 
+
     @Override
-    public String getKey(){
+    public String getKey() {
         return getName() + "_" + actionId;
     }
 
