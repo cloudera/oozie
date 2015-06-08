@@ -566,37 +566,50 @@ public class JavaActionExecutor extends ActionExecutor {
     protected void addShareLib(Path appPath, Configuration conf, String[] actionShareLibNames)
             throws ActionExecutorException {
         if (actionShareLibNames != null) {
-            String user = conf.get("user.name");
-            FileSystem fs;
+//            String user = conf.get("user.name");
+//            FileSystem fs;
             try {
 
                 Path systemLibPath = Services.get().get(WorkflowAppService.class).getSystemLibPath();
-                if (systemLibPath.toUri().getScheme() != null && systemLibPath.toUri().getAuthority() != null) {
-                    fs = Services.get().get(HadoopAccessorService.class)
-                            .createFileSystem(user, systemLibPath.toUri(), conf);
+//                if (systemLibPath.toUri().getScheme() != null && systemLibPath.toUri().getAuthority() != null) {
+//                    fs = Services.get().get(HadoopAccessorService.class)
+//                            .createFileSystem(user, systemLibPath.toUri(), conf);
+//                }
+//                else {
+//                    fs = Services.get().get(HadoopAccessorService.class).createFileSystem(user, appPath.toUri(), conf);
+//                }
+                ShareLibService shareLibService = Services.get().get(ShareLibService.class);
+                List<Path> tmplistOfPaths = shareLibService.getSystemLibJars(JavaActionExecutor.OOZIE_COMMON_LIBDIR);
+                if (tmplistOfPaths == null || tmplistOfPaths.isEmpty()) {
+                    throw new ActionExecutorException(ActionExecutorException.ErrorType.FAILED, "EJ001",
+                            "Could not locate Oozie sharelib");
                 }
-                else {
-                    fs = Services.get().get(HadoopAccessorService.class).createFileSystem(user, appPath.toUri(), conf);
-                }
+                FileSystem fs = tmplistOfPaths.get(0).getFileSystem(conf);
                 for (String actionShareLibName : actionShareLibNames) {
 
                     if (systemLibPath != null) {
-                        ShareLibService shareLibService = Services.get().get(ShareLibService.class);
+//                        ShareLibService shareLibService = Services.get().get(ShareLibService.class);
                         List<Path> listOfPaths = shareLibService.getShareLibJars(actionShareLibName);
+                        Path tmpActionLibPath;
                         if (listOfPaths != null && !listOfPaths.isEmpty()) {
 
                             for (Path actionLibPath : listOfPaths) {
-                                DistributedCache.addFileToClassPath(actionLibPath, conf, fs);
+                                if(actionLibPath.toUri().getAuthority() != null){
+                                  tmpActionLibPath = new Path(actionLibPath.toUri().getPath());
+                                }else{
+                                  tmpActionLibPath = actionLibPath;
+                                }
+                                DistributedCache.addFileToClassPath(tmpActionLibPath, conf, fs);
                                 DistributedCache.createSymlink(conf);
                             }
                         }
                     }
                 }
             }
-            catch (HadoopAccessorException ex) {
-                throw new ActionExecutorException(ActionExecutorException.ErrorType.FAILED, ex.getErrorCode()
-                        .toString(), ex.getMessage());
-            }
+//            catch (HadoopAccessorException ex) {
+//                throw new ActionExecutorException(ActionExecutorException.ErrorType.FAILED, ex.getErrorCode()
+//                        .toString(), ex.getMessage());
+//            }
             catch (IOException ex) {
                 throw new ActionExecutorException(ActionExecutorException.ErrorType.FAILED, "It should never happen",
                         ex.getMessage());
@@ -615,14 +628,25 @@ public class JavaActionExecutor extends ActionExecutor {
                             "Could not locate Oozie sharelib");
                 }
                 FileSystem fs = listOfPaths.get(0).getFileSystem(conf);
+                Path tmpActionLibPath;
                 for (Path actionLibPath : listOfPaths) {
-                    DistributedCache.addFileToClassPath(actionLibPath, conf, fs);
+                    if(actionLibPath.toUri().getAuthority() != null){
+                      tmpActionLibPath = new Path(actionLibPath.toUri().getPath());
+                    }else{
+                      tmpActionLibPath = actionLibPath;
+                    }
+                    DistributedCache.addFileToClassPath(tmpActionLibPath, conf, fs);
                     DistributedCache.createSymlink(conf);
                 }
                 listOfPaths = shareLibService.getSystemLibJars(getType());
                 if (listOfPaths != null) {
                     for (Path actionLibPath : listOfPaths) {
-                        DistributedCache.addFileToClassPath(actionLibPath, conf, fs);
+                        if(actionLibPath.toUri().getAuthority() != null){
+                          tmpActionLibPath = new Path(actionLibPath.toUri().getPath());
+                        }else{
+                          tmpActionLibPath = actionLibPath;
+                        }
+                        DistributedCache.addFileToClassPath(tmpActionLibPath, conf, fs);
                         DistributedCache.createSymlink(conf);
                     }
                 }
