@@ -171,7 +171,10 @@ public class SshActionExecutor extends ActionExecutor {
     @Override
     public void kill(Context context, WorkflowAction action) throws ActionExecutorException {
         //Kill process group in case sub process is isolated.
-        String command = "ssh " + action.getTrackerUri() + " kill -KILL -- -"+ action.getExternalId();
+        XLog log = XLog.getLog(getClass());
+        String command = "ssh " + action.getTrackerUri() + " kill -KILL -- -$(ps xao pid,pgid | grep "
+                + action.getExternalId() + " | cut -d ' ' -f2)";
+        log.info("Killing ssh job using command " + command);
         int returnValue = getReturnValue(command);
         if (returnValue != 0) {
             throw new ActionExecutorException(ActionExecutorException.ErrorType.ERROR, "FAILED_TO_KILL", XLog.format(
