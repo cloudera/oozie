@@ -130,7 +130,7 @@ public abstract class WorkflowAppService implements Service {
                 throw new WorkflowException(ErrorCode.E0736, fsStatus.getLen(), this.maxWFLength);
             }
 
-            Reader reader = new InputStreamReader(fs.open(path));
+            Reader reader = new InputStreamReader(fs.open(path), "utf-8");
             StringWriter writer = new StringWriter();
             IOUtils.copyCharStream(reader, writer);
             return writer.toString();

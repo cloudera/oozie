@@ -18,10 +18,7 @@
 
 package org.apache.oozie.action.email;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -39,11 +36,7 @@ import javax.mail.NoSuchProviderException;
 import javax.mail.PasswordAuthentication;
 import javax.mail.Session;
 import javax.mail.Transport;
-import javax.mail.internet.AddressException;
-import javax.mail.internet.InternetAddress;
-import javax.mail.internet.MimeBodyPart;
-import javax.mail.internet.MimeMessage;
-import javax.mail.internet.MimeMultipart;
+import javax.mail.internet.*;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -241,7 +234,7 @@ public class EmailActionExecutor extends ActionExecutor {
             message.addRecipients(RecipientType.BCC, bccAddrs.toArray(new InternetAddress[0]));
 
             // Set subject
-            message.setSubject(subject);
+            message.setSubject(MimeUtility.encodeText(subject,MimeUtility.mimeCharset("UTF-8"), "B"));
 
             // when there is attachment
             if (attachments != null && attachments.length > 0 && ConfigurationService.getBoolean(EMAIL_ATTACHMENT_ENABLED)) {
@@ -249,7 +242,7 @@ public class EmailActionExecutor extends ActionExecutor {
 
                 // Set body text
                 MimeBodyPart bodyTextPart = new MimeBodyPart();
-                bodyTextPart.setText(body);
+                bodyTextPart.setContent(body, "text/html;charset=UTF-8");
                 multipart.addBodyPart(bodyTextPart);
 
                 for (String attachment : attachments) {
@@ -262,7 +255,7 @@ public class EmailActionExecutor extends ActionExecutor {
                     MimeBodyPart messageBodyPart = new MimeBodyPart();
                     DataSource source = new URIDataSource(attachUri, user);
                     messageBodyPart.setDataHandler(new DataHandler(source));
-                    messageBodyPart.setFileName(new File(attachment).getName());
+                    messageBodyPart.setFileName(MimeUtility.encodeText(new File(attachment).getName(),"UTF-8","B"));
                     multipart.addBodyPart(messageBodyPart);
                 }
                 message.setContent(multipart);
@@ -271,8 +264,11 @@ public class EmailActionExecutor extends ActionExecutor {
                 if (attachments != null && attachments.length > 0 && !ConfigurationService.getBoolean(EMAIL_ATTACHMENT_ENABLED)) {
                     body = body + EMAIL_ATTACHMENT_ERROR_MSG;
                 }
-                message.setContent(body, contentType);
+                message.setContent(body, contentType+";charset=utf-8");
             }
+        }
+        catch (UnsupportedEncodingException e){
+            throw new ActionExecutorException(ErrorType.ERROR, "EM004", "Can't convert encoding to UTF-8.", e);
         }
         catch (AddressException e) {
             throw new ActionExecutorException(ErrorType.ERROR, "EM004", "Bad address format in <to> or <cc> or <bcc>.", e);
